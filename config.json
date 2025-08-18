@@ -1,0 +1,23 @@
+{
+    "app":{
+        "name":"movie-api-service",
+        "host": "0.0.0.0",
+        "port": 8080
+    },
+    "log":{
+        "path": "./logs/app.log",
+        "stdout": true
+    },
+    "database": {
+        "username": "root",
+        "password": "root",
+        "host": "mysql",
+        "port": 3306,
+        "name": "movies_db",
+        "pool": {
+          "idle": 10,
+          "max": 100,
+          "lifetime": 300
+        }
+      }
+}
