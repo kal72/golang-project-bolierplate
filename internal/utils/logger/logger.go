@@ -2,6 +2,8 @@ package logger
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -9,49 +11,64 @@ import (
 
 const SessionLogKey = "session_log_key"
 
-// standar log  field
-type LogField struct {
-	Status       string      `json:"status"`
-	CorelationID string      `json:"corelation_id"`
-	RequestID    string      `json:"request_id"`
-	ClientIP     string      `json:"client_ip"`
-	Service      string      `json:"service"`
-	Source       string      `json:"Source"`
-	UserAgent    string      `json:"user_agent"`
-	HTTPMethod   string      `json:"http_method"`
-	HTTPStatus   int         `json:"http_status"`
-	Endpoint     string      `json:"endpoint"`
-	Request      interface{} `json:"request"`
-	Response     interface{} `json:"response,"`
-	StartTime    time.Time
+type LogMessage struct {
+	Level   logrus.Level
+	Message string
+	Fields  logrus.Fields
+	Time    time.Time
 }
 
 type Logger struct {
 	Log     *logrus.Logger
 	AppName string
+	ch      chan LogMessage
+	quit    chan struct{}
+	wg      sync.WaitGroup
 }
 
-func New(log *logrus.Logger, appName string) *Logger {
-	return &Logger{Log: log, AppName: appName}
-}
-
-func mappingLog(ctx context.Context) logrus.Fields {
-	logField, ok := ctx.Value(SessionLogKey).(*LogField)
-	if ok {
-		return logrus.Fields{
-			"corelation_id": logField.CorelationID,
-			"request_id":    logField.RequestID,
-			"client_ip":     logField.ClientIP,
-			"service":       logField.Service,
-			"source":        logField.Source,
-			"user_agent":    logField.UserAgent,
-			"http_method":   logField.HTTPMethod,
-			"http_status":   logField.HTTPStatus,
-			"endpoint":      logField.Endpoint,
-		}
+func New(log *logrus.Logger, appName string, bufferSize int) *Logger {
+	l := &Logger{
+		Log:     log,
+		AppName: appName,
+		ch:      make(chan LogMessage, bufferSize),
+		quit:    make(chan struct{}),
 	}
 
-	return nil
+	// worker goroutine
+	l.wg.Add(1)
+	go func() {
+		defer l.wg.Done()
+		for {
+			select {
+			case msg := <-l.ch:
+				entry := l.Log.WithFields(msg.Fields)
+				switch msg.Level {
+				case logrus.InfoLevel:
+					entry.Info(msg.Message)
+				case logrus.WarnLevel:
+					entry.Warn(msg.Message)
+				case logrus.ErrorLevel:
+					entry.Error(msg.Message)
+				case logrus.DebugLevel:
+					entry.Debug(msg.Message)
+				default:
+					entry.Print(msg.Message)
+				}
+			case <-l.quit:
+				// flush semua log tersisa di channel sebelum exit
+				for msg := range l.ch {
+					l.Log.WithFields(msg.Fields).Log(msg.Level, msg.Message)
+				}
+				return
+			}
+		}
+	}()
+
+	return l
+}
+
+func (l *Logger) logMsg(level logrus.Level, msg string, fields logrus.Fields) {
+	l.ch <- LogMessage{Level: level, Message: msg, Fields: fields, Time: time.Now()}
 }
 
 // func (l *Logger) StartRequest(ctx context.Context, request any) {
@@ -71,31 +88,30 @@ func mappingLog(ctx context.Context) logrus.Fields {
 // 		Info("Finish request")
 // }
 
-func (l *Logger) Error(ctx context.Context, err error, msg ...string) {
-	logFieldMap := mappingLog(ctx)
-	l.Log.
-		WithFields(logFieldMap).
-		WithError(err).
-		Error(msg)
+func (l *Logger) LogEvent(ctx context.Context, err error, request any, response any) {
+	fields, ok := ctx.Value(SessionLogKey).(logrus.Fields)
+	if ok {
+		req, _ := json.Marshal(request)
+		resp, _ := json.Marshal(response)
+		fields["request"] = string(req)
+		fields["response"] = string(resp)
+		fields["error"] = err
+		fields["status"] = "success"
+		if err != nil {
+			fields["status"] = "error"
+		}
+		l.logMsg(0, "HTTP Event", fields)
+	}
 }
 
-func (l *Logger) Response(logField LogField, err error, msg ...string) {
-	logFieldMap := logrus.Fields{
-		"Status":        logField.Status,
-		"corelation_id": logField.CorelationID,
-		"request_id":    logField.RequestID,
-		"client_ip":     logField.ClientIP,
-		"service":       logField.Service,
-		"source":        logField.Source,
-		"user_agent":    logField.UserAgent,
-		"http_method":   logField.HTTPMethod,
-		"http_status":   logField.HTTPStatus,
-		"endpoint":      logField.Endpoint,
-		"request":       logField.Request,
-		"response":      logField.Response,
-	}
-	l.Log.
-		WithFields(logFieldMap).
-		WithError(err).
-		Print()
+func (l *Logger) Info(msg string, fields logrus.Fields)  { l.logMsg(logrus.InfoLevel, msg, fields) }
+func (l *Logger) Warn(msg string, fields logrus.Fields)  { l.logMsg(logrus.WarnLevel, msg, fields) }
+func (l *Logger) Error(msg string, fields logrus.Fields) { l.logMsg(logrus.ErrorLevel, msg, fields) }
+func (l *Logger) Debug(msg string, fields logrus.Fields) { l.logMsg(logrus.DebugLevel, msg, fields) }
+
+// Close → auto flush sebelum shutdown
+func (l *Logger) Close() {
+	close(l.quit)
+	l.wg.Wait() // tunggu worker selesai
+	close(l.ch) // close channel setelah flush
 }

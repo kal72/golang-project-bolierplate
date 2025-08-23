@@ -2,10 +2,10 @@ package middleware
 
 import (
 	"golang-project-boilerplate/internal/utils/logger"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
+	"github.com/sirupsen/logrus"
 )
 
 func HandleReqLogging(log *logger.Logger) fiber.Handler {
@@ -17,23 +17,19 @@ func HandleReqLogging(log *logger.Logger) fiber.Handler {
 			cid = uuid.New().String()
 		}
 
-		newLogField := logger.LogField{
-			CorelationID: cid,
-			RequestID:    reqId,
-			Source:       source,
-			Service:      log.AppName,
-			ClientIP:     ctx.IP(),
-			UserAgent:    string(ctx.Context().UserAgent()),
-			HTTPMethod:   ctx.Method(),
-			Endpoint:     ctx.OriginalURL(),
-			StartTime:    time.Now(),
+		logFieldMap := logrus.Fields{
+			"corelation_id": cid,
+			"request_id":    reqId,
+			"client_ip":     ctx.IP(),
+			"service":       log.AppName,
+			"source":        source,
+			"user_agent":    string(ctx.Context().UserAgent()),
+			"http_method":   ctx.Method(),
+			"http_status":   ctx.Response().StatusCode(),
+			"endpoint":      ctx.OriginalURL(),
 		}
 
-		ctx.Locals(logger.SessionLogKey, newLogField)
+		ctx.Locals(logger.SessionLogKey, logFieldMap)
 		return ctx.Next()
 	}
 }
-
-// func GetSessionLogger(ctx *fiber.Ctx) logrus.FieldLogger {
-// 	return ctx.Locals(LoggerKey).(logrus.FieldLogger)
-// }
