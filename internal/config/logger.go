@@ -5,19 +5,18 @@ import (
 	"os"
 
 	"github.com/sirupsen/logrus"
-	"github.com/spf13/viper"
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-func NewLogger(viper *viper.Viper) *logger.Logger {
+func NewLogger(config *Config) *logger.Logger {
 	log := logrus.New()
 	log.SetFormatter(&logrus.JSONFormatter{})
 
-	appName := viper.GetString("app.name")
-	stdout := viper.GetBool("log.stdout")
-	path := viper.GetString("log.path")
+	appName := config.App.Name
+	stdout := config.Log.Stdout
+	path := config.Log.Path
 	if path == "" {
-		panic("config 'log.path' cannot be empty!")
+		log.Fatalf("config 'log.path' cannot be empty!")
 	}
 
 	if stdout {

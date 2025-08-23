@@ -27,7 +27,7 @@ func ResponseSuccessWithPaging(ctx *fiber.Ctx, data interface{}, paging model.Pa
 		})
 }
 
-func ResponseError(ctx *fiber.Ctx, err model.ErrorData) error {
+func ResponseError(ctx *fiber.Ctx, err *model.ErrorData) error {
 	return ctx.Status(err.Code).
 		JSON(model.Response{
 			Status:  fmt.Sprint(err.Code),
