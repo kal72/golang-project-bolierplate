@@ -34,5 +34,5 @@ func NewLogger(config *Config) *logger.Logger {
 		log.SetOutput(lumberjackLogger)
 	}
 
-	return logger.New(log, appName)
+	return logger.New(log, appName, 4000)
 }

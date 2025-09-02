@@ -1,13 +1,12 @@
-# Movie Technical Test
+# Golang Project Boilerplate
 
 ## Description
 
-This is a project built with Golang Clean architecture. This project is an api service for movie management.
+This is a project built with Golang Clean architecture.
 
 ## Tech Stack
 
 - Golang v1.20
-- MySQL (Database) v5.7
 
 ## Framework & Library
 
@@ -45,7 +44,7 @@ All database sql is in `db` folder. mysql will be installed automatically when u
 
 Go to the project root directory and execute the command below:
 ```shell
-docker-compose up -d
+go run cmd/web/main.go
 ```
 Check application running in browser
 ```shell
