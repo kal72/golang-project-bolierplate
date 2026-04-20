@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"golang-project-boilerplate/internal/config"
 	"golang-project-boilerplate/internal/model"
-	"golang-project-boilerplate/internal/utils/errorhandler"
+	"golang-project-boilerplate/internal/shared/errorhandler"
 
 	"github.com/golang-jwt/jwt/v5"
 )

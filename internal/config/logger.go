@@ -1,7 +1,7 @@
 package config
 
 import (
-	"golang-project-boilerplate/internal/utils/logger"
+	"golang-project-boilerplate/internal/shared/logger"
 	"os"
 
 	"github.com/sirupsen/logrus"

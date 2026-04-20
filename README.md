@@ -6,7 +6,7 @@ This is a project built with Golang Clean architecture.
 
 ## Tech Stack
 
-- Golang v1.20
+- Golang v1.26
 
 ## Framework & Library
 

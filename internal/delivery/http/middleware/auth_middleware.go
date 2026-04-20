@@ -1,8 +1,8 @@
 package middleware
 
 import (
+	"golang-project-boilerplate/internal/shared/response"
 	"golang-project-boilerplate/internal/usecase/auth"
-	"golang-project-boilerplate/internal/utils/response"
 
 	"github.com/gofiber/fiber/v2"
 )

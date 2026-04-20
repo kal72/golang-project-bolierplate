@@ -2,7 +2,7 @@ package errorhandler
 
 import (
 	"golang-project-boilerplate/internal/model"
-	"golang-project-boilerplate/internal/utils/constant"
+	"golang-project-boilerplate/internal/shared/constant"
 )
 
 func ErrorPanic(err error) *model.ErrorData {

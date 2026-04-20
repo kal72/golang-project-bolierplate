@@ -1,7 +1,7 @@
-package utils
+package shared
 
 import (
-	"golang-project-boilerplate/internal/utils/constant"
+	"golang-project-boilerplate/internal/shared/constant"
 	"time"
 )
 

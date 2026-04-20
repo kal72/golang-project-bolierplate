@@ -1,7 +1,7 @@
 package middleware
 
 import (
-	"golang-project-boilerplate/internal/utils/logger"
+	"golang-project-boilerplate/internal/shared/logger"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"

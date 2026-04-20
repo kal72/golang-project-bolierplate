@@ -6,8 +6,8 @@ import (
 )
 
 func main() {
-	newConfig := config.NewConfig()
-	app := app.NewContainer(newConfig)
-	app.SetupRoutes()
-	app.GracefullyShutdown(app.Run)
+	cfg := config.NewConfig()
+	fiberApp := config.NewFiber(cfg)
+	app.Container(fiberApp, cfg)
+	app.RunWithGracefulShutdown(fiberApp, cfg)
 }
