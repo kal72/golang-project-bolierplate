@@ -1,2 +1,8 @@
 logs/*
 buid/*
+.claude
+.antigravity
+.vscode
+.idea
+.DS_Store
+.env
