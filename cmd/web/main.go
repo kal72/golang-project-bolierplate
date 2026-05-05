@@ -2,12 +2,14 @@ package main
 
 import (
 	"golang-project-boilerplate/internal/app"
-	"golang-project-boilerplate/internal/config"
+	"log"
 )
 
 func main() {
-	cfg := config.NewConfig()
-	fiberApp := config.NewFiber(cfg)
-	app.Container(fiberApp, cfg)
-	app.RunWithGracefulShutdown(fiberApp, cfg)
+	application, err := app.InitializeApp()
+	if err != nil {
+		log.Fatalf("failed to initialize app: %v", err)
+	}
+
+	application.RunWithGracefulShutdown()
 }
