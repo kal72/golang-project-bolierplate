@@ -8,9 +8,10 @@ import (
 )
 
 type AppConfig struct {
-	Name string
-	Host string
-	Port int
+	Name     string
+	Host     string
+	Port     int
+	GrpcPort int
 }
 
 type LogConfig struct {

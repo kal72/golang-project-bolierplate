@@ -3,8 +3,9 @@ package app
 import (
 	"fmt"
 	"golang-project-boilerplate/internal/config"
-	"golang-project-boilerplate/internal/delivery/http/router"
+	"golang-project-boilerplate/internal/delivery/grpc/server"
 	"log"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,21 +15,27 @@ import (
 )
 
 type App struct {
-	fiber  *fiber.App
-	config *config.Config
+	grpcServer *server.GrpcServer
+	config     *config.Config
 }
 
-func NewApp(fiber *fiber.App, cfg *config.Config, r *router.Route) *App {
-	r.SetupRouter()
+func NewApp(fiber *fiber.App, cfg *config.Config, grpcServer *server.GrpcServer) *App {
 	return &App{
-		fiber:  fiber,
-		config: cfg,
+		grpcServer: grpcServer,
+		config:     cfg,
 	}
 }
 
 func (a *App) RunWithGracefulShutdown() {
+	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", a.config.App.GrpcPort))
+	if err != nil {
+		log.Fatalf("Failed to start server: %v", err)
+	}
+
+	grpc := a.grpcServer.SetupGrpc()
 	go func() {
-		err := a.fiber.Listen(fmt.Sprintf("%s:%d", a.config.App.Host, a.config.App.Port))
+		fmt.Printf("Grpc server started on port %d\n", a.config.App.GrpcPort)
+		err := grpc.Serve(lis)
 		if err != nil {
 			log.Fatalf("Failed to start server: %v", err)
 		}
@@ -40,8 +47,18 @@ func (a *App) RunWithGracefulShutdown() {
 
 	log.Println("Shutting down server...")
 
-	if err := a.fiber.ShutdownWithTimeout(5 * time.Second); err != nil {
-		log.Printf("error shutdown: %v", err)
+	done := make(chan struct{})
+	go func() {
+		grpc.GracefulStop()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		log.Println("graceful shutdown complete")
+	case <-time.After(5 * time.Second):
+		log.Println("force shutdown...")
+		grpc.Stop() // force kill
 	}
 
 	log.Println("Server stopped gracefully")

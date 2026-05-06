@@ -1,13 +1,13 @@
 //go:build wireinject
 
-package app
+package di
 
 import (
+	"golang-project-boilerplate/internal/app"
 	"golang-project-boilerplate/internal/config"
-	"golang-project-boilerplate/internal/delivery/http/handler"
-	"golang-project-boilerplate/internal/delivery/http/middleware"
-	"golang-project-boilerplate/internal/delivery/http/router"
-	"golang-project-boilerplate/internal/usecase/auth"
+	"golang-project-boilerplate/internal/delivery/grpc/handler"
+	"golang-project-boilerplate/internal/delivery/grpc/middleware"
+	"golang-project-boilerplate/internal/delivery/grpc/server"
 
 	"github.com/google/wire"
 )
@@ -24,27 +24,25 @@ var middlewareSet = wire.NewSet(
 	middleware.NewMiddleware,
 )
 
-var usecaseSet = wire.NewSet(
-	auth.NewAuthUsecase,
-)
+// var usecaseSet = wire.NewSet()
 
 var handlerSet = wire.NewSet(
 	handler.NewPingHandler,
 )
 
-var routerSet = wire.NewSet(
-	router.NewRoute,
+var appSet = wire.NewSet(
+	server.NewGrpcServer,
+	app.NewApp,
 )
 
 // InitializeApp
-func InitializeApp() (*App, error) {
+func InitializeApp() (*app.App, error) {
 	wire.Build(
 		configSet,
 		middlewareSet,
-		usecaseSet,
+		// usecaseSet,
 		handlerSet,
-		routerSet,
-		NewApp,
+		appSet,
 	)
 	return nil, nil
 }

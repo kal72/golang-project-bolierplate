@@ -1,12 +1,12 @@
 package main
 
 import (
-	"golang-project-boilerplate/internal/app"
+	"golang-project-boilerplate/di"
 	"log"
 )
 
 func main() {
-	application, err := app.InitializeApp()
+	application, err := di.InitializeApp()
 	if err != nil {
 		log.Fatalf("failed to initialize app: %v", err)
 	}
