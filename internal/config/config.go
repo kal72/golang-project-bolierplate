@@ -56,12 +56,24 @@ type CircuitBreakerConfig struct {
 	MaxHalfOpenReq   int
 }
 
+type RabbitMQConfig struct {
+	Username       string
+	Password       string
+	Host           string
+	Port           int
+	VHost          string
+	ConnectTimeout int // seconds
+	Heartbeat      int // seconds
+	PrefetchCount  int
+}
+
 type Config struct {
 	App      AppConfig
 	Log      LogConfig
 	Database DatabaseConfig
 	Redis    RedisConfig
 	Jwt      JwtConfig
+	RabbitMQ RabbitMQConfig
 }
 
 func NewConfig() *Config {

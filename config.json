@@ -19,5 +19,15 @@
           "max": 100,
           "lifetime": 300
         }
-      }
+      },
+    "rabbitmq": {
+        "username": "guest",
+        "password": "guest",
+        "host": "rabbitmq",
+        "port": 5672,
+        "vhost": "/",
+        "connecttimeout": 30,
+        "heartbeat": 10,
+        "prefetchcount": 10
+    }
 }
