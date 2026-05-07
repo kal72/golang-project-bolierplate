@@ -2,7 +2,8 @@
     "app":{
         "name":"golang-project-boilerplate",
         "host": "0.0.0.0",
-        "port": 8080
+        "port": 8080,
+        "shutdowntimeout": 15
     },
     "log":{
         "path": "./logs/app.log",
@@ -26,8 +27,55 @@
         "host": "rabbitmq",
         "port": 5672,
         "vhost": "/",
+        "tls": false,
         "connecttimeout": 30,
         "heartbeat": 10,
-        "prefetchcount": 10
+        "prefetchcount": 10,
+        "reconnectdelay": 2,
+        "maxreconnectdelay": 30,
+        "publishtimeout": 10,
+        "breaker": {
+            "failurethreshold": 0.5,
+            "minrequests": 10,
+            "timeout": "30s",
+            "maxhalfopenreq": 3
+        },
+        "outbox": {
+            "enabled": false,
+            "pollinterval": 2,
+            "batchsize": 50,
+            "maxattempts": 10,
+            "basebackoff": 5,
+            "maxbackoff": 300
+        }
+    },
+    "kafka": {
+        "brokers": ["kafka:9092"],
+        "clientid": "golang-project-boilerplate",
+        "tls": false,
+        "sasl": {
+            "enabled": false,
+            "mechanism": "PLAIN",
+            "username": "",
+            "password": ""
+        },
+        "dialtimeout": 10,
+        "writetimeout": 10,
+        "readtimeout": 10,
+        "requiredacks": -1,
+        "compression": "snappy",
+        "batchsize": 100,
+        "batchtimeout": 50,
+        "groupid": "golang-project-boilerplate",
+        "startoffset": "latest",
+        "minbytes": 1,
+        "maxbytes": 1048576,
+        "maxattempts": 5,
+        "breaker": {
+            "failurethreshold": 0.5,
+            "minrequests": 10,
+            "timeout": "30s",
+            "maxhalfopenreq": 3
+        }
     }
 }

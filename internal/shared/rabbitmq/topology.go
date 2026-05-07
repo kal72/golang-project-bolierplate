@@ -1,6 +1,8 @@
 package rabbitmq
 
 import (
+	"fmt"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -23,7 +25,11 @@ type ExchangeOptions struct {
 	Args       amqp.Table
 }
 
-func DeclareQueue(ch *amqp.Channel, opts QueueOptions) (amqp.Queue, error) {
+func DeclareQueue(conn *Connection, opts QueueOptions) (amqp.Queue, error) {
+	ch := conn.RawChannel()
+	if ch == nil {
+		return amqp.Queue{}, fmt.Errorf("rabbitmq channel unavailable")
+	}
 	return ch.QueueDeclare(
 		opts.Name,
 		opts.Durable,
@@ -34,7 +40,11 @@ func DeclareQueue(ch *amqp.Channel, opts QueueOptions) (amqp.Queue, error) {
 	)
 }
 
-func DeclareExchange(ch *amqp.Channel, opts ExchangeOptions) error {
+func DeclareExchange(conn *Connection, opts ExchangeOptions) error {
+	ch := conn.RawChannel()
+	if ch == nil {
+		return fmt.Errorf("rabbitmq channel unavailable")
+	}
 	kind := opts.Kind
 	if kind == "" {
 		kind = "direct"
@@ -50,6 +60,10 @@ func DeclareExchange(ch *amqp.Channel, opts ExchangeOptions) error {
 	)
 }
 
-func BindQueue(ch *amqp.Channel, queue, exchange, routingKey string, args amqp.Table) error {
+func BindQueue(conn *Connection, queue, exchange, routingKey string, args amqp.Table) error {
+	ch := conn.RawChannel()
+	if ch == nil {
+		return fmt.Errorf("rabbitmq channel unavailable")
+	}
 	return ch.QueueBind(queue, routingKey, exchange, false, args)
 }

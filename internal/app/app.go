@@ -1,23 +1,26 @@
 package app
 
 import (
+	"context"
 	"fmt"
-	"golang-project-boilerplate/internal/config"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"golang-project-boilerplate/internal/config"
+
 	"github.com/gofiber/fiber/v2"
 )
 
-func RunWithGracefulShutdown(fiberApp *fiber.App, cfg *config.Config) {
+const defaultShutdownTimeout = 15 * time.Second
+
+func RunWithGracefulShutdown(fiberApp *fiber.App, cfg *config.Config, lifecycle *Lifecycle) {
 	go func() {
 		host := cfg.App.Host
 		port := cfg.App.Port
-		err := fiberApp.Listen(fmt.Sprintf("%s:%d", host, port))
-		if err != nil {
+		if err := fiberApp.Listen(fmt.Sprintf("%s:%d", host, port)); err != nil {
 			log.Fatalf("Failed to start server: %v", err)
 		}
 	}()
@@ -28,8 +31,21 @@ func RunWithGracefulShutdown(fiberApp *fiber.App, cfg *config.Config) {
 
 	log.Println("Shutting down server...")
 
+	// 1. Stop menerima request HTTP baru, tunggu in-flight selesai.
 	if err := fiberApp.ShutdownWithTimeout(5 * time.Second); err != nil {
-		log.Printf("error shutdown: %v", err)
+		log.Printf("error fiber shutdown: %v", err)
+	}
+
+	// 2. Tutup resource lain (consumer → relayer → rabbitmq → db → logger)
+	//    Lifecycle menutup dalam urutan LIFO.
+	if lifecycle != nil {
+		timeout := time.Duration(cfg.App.ShutdownTimeout) * time.Second
+		if timeout <= 0 {
+			timeout = defaultShutdownTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		defer cancel()
+		lifecycle.Shutdown(ctx)
 	}
 
 	log.Println("Server stopped gracefully")

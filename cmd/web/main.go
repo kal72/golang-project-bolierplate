@@ -8,6 +8,6 @@ import (
 func main() {
 	cfg := config.NewConfig()
 	fiberApp := config.NewFiber(cfg)
-	app.Container(fiberApp, cfg)
-	app.RunWithGracefulShutdown(fiberApp, cfg)
+	lifecycle := app.Container(fiberApp, cfg)
+	app.RunWithGracefulShutdown(fiberApp, cfg, lifecycle)
 }
