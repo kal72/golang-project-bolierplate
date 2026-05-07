@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang-project-boilerplate/internal/config"
+
 	"github.com/gofiber/fiber/v2"
 )
 

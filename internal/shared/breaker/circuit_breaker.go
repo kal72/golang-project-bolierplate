@@ -3,14 +3,13 @@ package breaker
 import (
 	"context"
 	"errors"
-	"golang-project-boilerplate/internal/config"
 	"sync"
 	"time"
 )
 
 type CircuitBreaker struct {
 	mu          sync.Mutex
-	config      config.CircuitBreakerConfig
+	config      Config
 	state       State
 	failures    int
 	success     int
@@ -18,9 +17,9 @@ type CircuitBreaker struct {
 	halfOpenReq int
 }
 
-func NewCircuitBreaker(config config.CircuitBreakerConfig) *CircuitBreaker {
+func NewCircuitBreaker(cfg Config) *CircuitBreaker {
 	return &CircuitBreaker{
-		config: config,
+		config: cfg,
 		state:  StateClosed,
 	}
 }
