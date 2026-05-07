@@ -1,9 +1,8 @@
 package app
 
 import (
+	"context"
 	"fmt"
-	"golang-project-boilerplate/internal/config"
-	"golang-project-boilerplate/internal/delivery/http/router"
 	"log"
 	"os"
 	"os/signal"
@@ -11,20 +10,23 @@ import (
 	"time"
 
 	"golang-project-boilerplate/internal/config"
+	"golang-project-boilerplate/internal/delivery/http/router"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 type App struct {
-	fiber  *fiber.App
-	config *config.Config
+	fiber     *fiber.App
+	config    *config.Config
+	lifecycle *Lifecycle
 }
 
-func NewApp(fiber *fiber.App, cfg *config.Config, r *router.Route) *App {
+func NewApp(fiber *fiber.App, cfg *config.Config, r *router.Route, lc *Lifecycle) *App {
 	r.SetupRouter()
 	return &App{
-		fiber:  fiber,
-		config: cfg,
+		fiber:     fiber,
+		config:    cfg,
+		lifecycle: lc,
 	}
 }
 
@@ -42,9 +44,19 @@ func (a *App) RunWithGracefulShutdown() {
 
 	log.Println("Shutting down server...")
 
-	if err := a.fiber.ShutdownWithTimeout(5 * time.Second); err != nil {
-		log.Printf("error shutdown: %v", err)
+	timeout := time.Duration(a.config.App.ShutdownTimeout) * time.Second
+	if timeout == 0 {
+		timeout = 15 * time.Second
 	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	if err := a.fiber.ShutdownWithContext(ctx); err != nil {
+		log.Printf("fiber shutdown error: %v", err)
+	}
+
+	a.lifecycle.Shutdown(ctx)
 
 	log.Println("Server stopped gracefully")
 }

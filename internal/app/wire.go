@@ -20,6 +20,10 @@ var configSet = wire.NewSet(
 	// config.NewRedis,    // uncomment when ready
 )
 
+var lifecycleSet = wire.NewSet(
+	NewLifecycle,
+)
+
 var middlewareSet = wire.NewSet(
 	middleware.NewMiddleware,
 )
@@ -40,6 +44,7 @@ var routerSet = wire.NewSet(
 func InitializeApp() (*App, error) {
 	wire.Build(
 		configSet,
+		lifecycleSet,
 		middlewareSet,
 		usecaseSet,
 		handlerSet,

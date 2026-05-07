@@ -26,13 +26,18 @@ func InitializeApp() (*App, error) {
 	middlewareMiddleware := middleware.NewMiddleware(logger, authUsecaseContract)
 	pingHandler := handler.NewPingHandler()
 	route := router.NewRoute(app, middlewareMiddleware, pingHandler)
-	appApp := NewApp(app, configConfig, route)
+	lifecycle := NewLifecycle(logger)
+	appApp := NewApp(app, configConfig, route, lifecycle)
 	return appApp, nil
 }
 
 // wire.go:
 
 var configSet = wire.NewSet(config.NewConfig, config.NewFiber, config.NewLogger)
+
+var lifecycleSet = wire.NewSet(
+	NewLifecycle,
+)
 
 var middlewareSet = wire.NewSet(middleware.NewMiddleware)
 
