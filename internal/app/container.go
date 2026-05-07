@@ -1,14 +1,12 @@
 package app
 
 import (
-	"log"
 	"time"
 
 	"golang-project-boilerplate/internal/config"
 	"golang-project-boilerplate/internal/delivery/http/handler"
 	"golang-project-boilerplate/internal/delivery/http/middleware"
 	"golang-project-boilerplate/internal/delivery/http/router"
-	"golang-project-boilerplate/internal/shared/breaker"
 	"golang-project-boilerplate/internal/shared/rabbitmq"
 	"golang-project-boilerplate/internal/shared/rabbitmq/outbox"
 	"golang-project-boilerplate/internal/usecase/auth"
@@ -37,17 +35,13 @@ func Container(fiberApp *fiber.App, cfg *config.Config) *Lifecycle {
 	// lifecycle.AddFunc("redis", func() error { return redisClient.Close() })
 
 	// === RabbitMQ ===
-	rmqConn, err := rabbitmq.NewConnection(cfg.RabbitMQ, appLog)
-	if err != nil {
-		log.Fatalf("init rabbitmq: %v", err)
-	}
+	rmqConn := config.NewRabbitMQ(cfg, appLog)
 	lifecycle.AddFunc("rabbitmq", func() error { return rmqConn.Close() })
 
 	// Publisher: pakai breaker dari config bila threshold > 0
 	var publisher *rabbitmq.Publisher
 	if cfg.RabbitMQ.Breaker.FailureThreshold > 0 {
-		cb := breaker.NewCircuitBreaker(cfg.RabbitMQ.Breaker)
-		publisher = rabbitmq.NewPublisherWithBreaker(rmqConn, cb)
+		publisher = rabbitmq.NewPublisherWithBreaker(rmqConn, config.NewCircuitBreaker(cfg.RabbitMQ.Breaker))
 	} else {
 		publisher = rabbitmq.NewPublisher(rmqConn)
 	}

@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"golang-project-boilerplate/internal/config"
 	"golang-project-boilerplate/internal/shared/logger"
 
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -44,7 +43,7 @@ func (c *Connection) publishTimeout() time.Duration {
 }
 
 type Connection struct {
-	cfg config.RabbitMQConfig
+	cfg Config
 	log *logger.Logger
 
 	mu       sync.Mutex
@@ -59,7 +58,7 @@ type Connection struct {
 
 // NewConnection membuat koneksi RabbitMQ dengan auto-reconnect & confirm mode.
 // Parameter log boleh nil; jika nil, log internal akan di-skip.
-func NewConnection(cfg config.RabbitMQConfig, log *logger.Logger) (*Connection, error) {
+func NewConnection(cfg Config, log *logger.Logger) (*Connection, error) {
 	c := &Connection{
 		cfg:  cfg,
 		log:  log,

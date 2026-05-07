@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"golang-project-boilerplate/internal/config"
 	"golang-project-boilerplate/internal/shared/logger"
 
 	"github.com/segmentio/kafka-go"
@@ -18,13 +17,13 @@ import (
 // Client packages config, logger, dialer, and transport so producer/consumer
 // can share a consistent, secure connection setup.
 type Client struct {
-	cfg       config.KafkaConfig
+	cfg       Config
 	log       *logger.Logger
 	dialer    *kafka.Dialer
 	transport *kafka.Transport
 }
 
-func NewClient(cfg config.KafkaConfig, log *logger.Logger) (*Client, error) {
+func NewClient(cfg Config, log *logger.Logger) (*Client, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, fmt.Errorf("kafka: brokers cannot be empty")
 	}
@@ -64,7 +63,7 @@ func NewClient(cfg config.KafkaConfig, log *logger.Logger) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) Config() config.KafkaConfig { return c.cfg }
+func (c *Client) Config() Config              { return c.cfg }
 func (c *Client) Logger() *logger.Logger     { return c.log }
 func (c *Client) Dialer() *kafka.Dialer      { return c.dialer }
 func (c *Client) Transport() *kafka.Transport { return c.transport }
@@ -100,7 +99,7 @@ func (c *Client) logError(msg string, fields logrus.Fields) {
 	c.log.Error(msg, fields)
 }
 
-func buildSASL(cfg config.KafkaSASLConfig) (sasl.Mechanism, error) {
+func buildSASL(cfg SASLConfig) (sasl.Mechanism, error) {
 	if !cfg.Enabled {
 		return nil, nil
 	}
