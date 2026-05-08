@@ -17,6 +17,12 @@ func NewRabbitMQ(cfg *Config, appLog *logger.Logger) *rabbitmq.Connection {
 	return conn
 }
 
+// NewRabbitMQPublisher membuat Publisher dari koneksi RabbitMQ yang sudah dibuat.
+// Gunakan PublishJSON atau PublishToQueue untuk mengirim pesan.
+func NewRabbitMQPublisher(conn *rabbitmq.Connection) *rabbitmq.Publisher {
+	return rabbitmq.NewPublisher(conn)
+}
+
 func toRabbitMQConfig(c RabbitMQConfig) rabbitmq.Config {
 	return rabbitmq.Config{
 		Username:          c.Username,
