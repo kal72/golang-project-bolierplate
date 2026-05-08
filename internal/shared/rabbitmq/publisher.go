@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"golang-project-boilerplate/internal/shared/breaker"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,19 +12,11 @@ import (
 )
 
 type Publisher struct {
-	conn    *Connection
-	breaker *breaker.CircuitBreaker
+	conn *Connection
 }
 
 func NewPublisher(conn *Connection) *Publisher {
 	return &Publisher{conn: conn}
-}
-
-// NewPublisherWithBreaker membungkus publish dengan circuit breaker.
-// Saat broker down/lambat, breaker akan Open dan publish gagal cepat tanpa
-// menunggu timeout konfirmasi 10s — mencegah back-pressure ke caller.
-func NewPublisherWithBreaker(conn *Connection, cb *breaker.CircuitBreaker) *Publisher {
-	return &Publisher{conn: conn, breaker: cb}
 }
 
 func (p *Publisher) publish(ctx context.Context, exchange, routingKey, contentType string, body []byte) error {
@@ -42,14 +33,7 @@ func (p *Publisher) publish(ctx context.Context, exchange, routingKey, contentTy
 	}
 
 	start := time.Now()
-	var err error
-	if p.breaker != nil {
-		_, err = p.breaker.Execute(ctx, func(ctx context.Context) (interface{}, error) {
-			return nil, p.conn.Publish(ctx, exchange, routingKey, contentType, pub)
-		})
-	} else {
-		err = p.conn.Publish(ctx, exchange, routingKey, contentType, pub)
-	}
+	err := p.conn.Publish(ctx, exchange, routingKey, contentType, pub)
 
 	if log := p.conn.Logger(); log != nil {
 		fields := logrus.Fields{

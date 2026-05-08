@@ -79,6 +79,7 @@ type RabbitMQConfig struct {
 	ReconnectDelay    int // seconds, initial backoff (default 2)
 	MaxReconnectDelay int // seconds, cap backoff (default 30)
 	PublishTimeout    int // seconds, timeout konfirmasi publish (default 10)
+	ChannelPoolSize   int // jumlah channel paralel untuk publish (default 5)
 	Breaker           CircuitBreakerConfig
 	Outbox            RabbitMQOutboxConfig
 }

@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"golang-project-boilerplate/internal/shared/breaker"
-
 	"github.com/google/uuid"
 	"github.com/segmentio/kafka-go"
 	"github.com/segmentio/kafka-go/compress"
@@ -15,11 +13,10 @@ import (
 )
 
 // Producer wraps kafka.Writer with sane defaults: acks=all, idempotent batching,
-// trace header injection, and optional circuit breaker.
+// trace header injection, and circuit breaker inherited from Client.
 type Producer struct {
-	client  *Client
-	writer  *kafka.Writer
-	breaker *breaker.CircuitBreaker
+	client *Client
+	writer *kafka.Writer
 }
 
 func NewProducer(client *Client) *Producer {
@@ -41,14 +38,6 @@ func NewProducer(client *Client) *Producer {
 	}
 
 	return &Producer{client: client, writer: w}
-}
-
-// NewProducerWithBreaker wraps publish calls with a circuit breaker. When the
-// breaker is open, writes fail fast with "circuit breaker is open".
-func NewProducerWithBreaker(client *Client, cb *breaker.CircuitBreaker) *Producer {
-	p := NewProducer(client)
-	p.breaker = cb
-	return p
 }
 
 // Publish sends raw bytes to a topic. Trace headers are injected automatically.
@@ -99,10 +88,10 @@ func (p *Producer) PublishJSON(ctx context.Context, topic, key string, payload a
 }
 
 func (p *Producer) write(ctx context.Context, msg kafka.Message) error {
-	if p.breaker == nil {
+	if p.client.breaker == nil {
 		return p.writer.WriteMessages(ctx, msg)
 	}
-	_, err := p.breaker.Execute(ctx, func(ctx context.Context) (interface{}, error) {
+	_, err := p.client.breaker.Execute(ctx, func(ctx context.Context) (interface{}, error) {
 		return nil, p.writer.WriteMessages(ctx, msg)
 	})
 	return err

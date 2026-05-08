@@ -8,13 +8,13 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-func NewLogger(config *Config) *logger.Logger {
+func NewLogger(cfg *Config) *logger.Logger {
 	log := logrus.New()
 	log.SetFormatter(&logrus.JSONFormatter{})
 
-	appName := config.App.Name
-	stdout := config.Log.Stdout
-	path := config.Log.Path
+	appName := cfg.App.Name
+	stdout := cfg.Log.Stdout
+	path := cfg.Log.Path
 	if path == "" {
 		log.Fatalf("config 'log.path' cannot be empty!")
 	}
