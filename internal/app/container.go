@@ -7,7 +7,6 @@ import (
 	"golang-project-boilerplate/internal/delivery/http/handler"
 	"golang-project-boilerplate/internal/delivery/http/middleware"
 	"golang-project-boilerplate/internal/delivery/http/router"
-	"golang-project-boilerplate/internal/shared/rabbitmq"
 	"golang-project-boilerplate/internal/shared/rabbitmq/outbox"
 	"golang-project-boilerplate/internal/usecase/auth"
 
@@ -35,64 +34,6 @@ func Container(fiberApp *fiber.App, cfg *config.Config) *Lifecycle {
 	// lifecycle.AddFunc("redis", func() error { return redisClient.Close() })
 
 	// === RabbitMQ ===
-	rmqConn := config.NewRabbitMQ(cfg, appLog)
-	lifecycle.AddFunc("rabbitmq", func() error { return rmqConn.Close() })
-
-	// Publisher: pakai breaker dari config bila threshold > 0
-	var publisher *rabbitmq.Publisher
-	if cfg.RabbitMQ.Breaker.FailureThreshold > 0 {
-		publisher = rabbitmq.NewPublisherWithBreaker(rmqConn, config.NewCircuitBreaker(cfg.RabbitMQ.Breaker))
-	} else {
-		publisher = rabbitmq.NewPublisher(rmqConn)
-	}
-	_ = publisher // inject ke usecase/handler sesuai kebutuhan
-
-	// Outbox relayer (aktif bila enabled dan DB sudah siap)
-	if cfg.RabbitMQ.Outbox.Enabled {
-		// db wajib aktif untuk outbox; uncomment baris di atas dulu.
-		// outboxRelayer := outbox.NewRelayer(db, rmqConn, appLog, outboxRelayerOpts(cfg.RabbitMQ.Outbox))
-		// outboxRelayer.Start(context.Background())
-		// lifecycle.AddFunc("outbox-relayer", func() error { outboxRelayer.Stop(); return nil })
-		_ = outboxRelayerOpts // referenced ketika DB siap & uncomment di atas
-	}
-
-	// === Kafka (uncomment & wire when needed) ===
-	// kafkaClient, err := kafka.NewClient(cfg.Kafka, appLog)
-	// if err != nil { log.Fatalf("init kafka: %v", err) }
-	// lifecycle.AddFunc("kafka-client", func() error { return kafkaClient.Close() })
-	//
-	// kafkaProducer := kafka.NewProducer(kafkaClient)
-	// // or with breaker:
-	// // cb := breaker.NewCircuitBreaker(cfg.Kafka.Breaker)
-	// // kafkaProducer := kafka.NewProducerWithBreaker(kafkaClient, cb)
-	// lifecycle.AddFunc("kafka-producer", func() error { return kafkaProducer.Close() })
-	//
-	// // Consumer with DLQ-on-error:
-	// kafkaDLQ := kafka.NewProducer(kafkaClient)
-	// lifecycle.AddFunc("kafka-dlq-producer", func() error { return kafkaDLQ.Close() })
-	// kafkaConsumer, err := kafka.NewConsumer(kafkaClient, kafka.ConsumerOptions{
-	// 	Topic:         "user.events",
-	// 	Workers:       3,
-	// 	HandleTimeout: 30 * time.Second,
-	// 	ErrorPolicy:   kafka.PolicyDLQ,
-	// 	DLQProducer:   kafkaDLQ,
-	// }, func(ctx context.Context, msg kafkago.Message) error { return nil })
-	// if err != nil { log.Fatalf("kafka consumer: %v", err) }
-	// _ = kafkaConsumer.Start(context.Background())
-	// lifecycle.AddFunc("kafka-consumer-user.events", func() error { kafkaConsumer.Stop(); return nil })
-
-	// --- RabbitMQ Consumer (contoh) ---
-	// userConsumer := rabbitmq.NewConsumer(rmqConn, rabbitmq.ConsumerOptions{
-	// 	Queue:          "user.events",
-	// 	ConsumerTag:    "user-svc",
-	// 	Workers:        5,
-	// 	HandleTimeout:  30 * time.Second,
-	// 	RequeueOnError: false,
-	// }, func(ctx context.Context, msg amqp091.Delivery) error { return nil })
-	// if err := userConsumer.Start(context.Background()); err != nil {
-	// 	log.Fatalf("start consumer: %v", err)
-	// }
-	// lifecycle.AddFunc("consumer-user.events", func() error { userConsumer.Stop(); return nil })
 
 	// === usecase ===
 	authUsecase := auth.NewAuthUsecase(cfg)
@@ -127,4 +68,3 @@ func outboxRelayerOpts(c config.RabbitMQOutboxConfig) outbox.RelayerOptions {
 		MaxBackoff:   time.Duration(c.MaxBackoff) * time.Second,
 	}
 }
-

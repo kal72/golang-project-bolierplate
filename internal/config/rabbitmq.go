@@ -31,5 +31,6 @@ func toRabbitMQConfig(c RabbitMQConfig) rabbitmq.Config {
 		ReconnectDelay:    c.ReconnectDelay,
 		MaxReconnectDelay: c.MaxReconnectDelay,
 		PublishTimeout:    c.PublishTimeout,
+		ChannelPoolSize:   c.ChannelPoolSize,
 	}
 }

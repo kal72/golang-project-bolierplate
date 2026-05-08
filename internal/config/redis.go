@@ -9,17 +9,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func NewRedis(config *Config) *redis.Client {
+func NewRedis(cfg *Config) *redis.Client {
 	ctx := context.Background()
 
 	// konfigurasi koneksi ke Dragonfly
 	rdb := redis.NewClient(&redis.Options{
-		Addr:         fmt.Sprintf("%s:%d", config.Redis.Host, config.Redis.Port),
-		Password:     config.Redis.Password,
-		DB:           config.Redis.DB,
-		PoolSize:     config.Redis.Pool.Max,
-		MinIdleConns: config.Redis.Pool.Idle,
-		PoolTimeout:  time.Duration(config.Redis.Pool.Timeout) * time.Second, //30s
+		Addr:         fmt.Sprintf("%s:%d", cfg.Redis.Host, cfg.Redis.Port),
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.DB,
+		PoolSize:     cfg.Redis.Pool.Max,
+		MinIdleConns: cfg.Redis.Pool.Idle,
+		PoolTimeout:  time.Duration(cfg.Redis.Pool.Timeout) * time.Second, //30s
 	})
 
 	_, err := rdb.Ping(ctx).Result()

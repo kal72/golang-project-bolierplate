@@ -28,23 +28,33 @@ protection, and the transactional outbox pattern.
 ┌──────────────────────────────────────────────────────────────────┐
 │                      Application Container                       │
 │                                                                  │
-│  ┌──────────┐   ┌─────────────┐   ┌─────────────────────────┐    │
-│  │ HTTP     │   │  Use case   │   │   Outbox Repository     │    │
-│  │ Handler  │──▶│  (business) │──▶│ (writes inside DB tx)   │    │
-│  └──────────┘   └─────────────┘   └─────────────────────────┘    │
+│  ┌──────────┐   ┌─────────────┐   ┌─────────────────────────┐   │
+│  │ HTTP     │   │  Use case   │   │   Outbox Repository     │   │
+│  │ Handler  │──▶│  (business) │──▶│ (writes inside DB tx)   │   │
+│  └──────────┘   └─────────────┘   └─────────────────────────┘   │
 │                       │                       │                  │
 │                       ▼                       ▼                  │
 │              ┌────────────────┐      ┌────────────────┐          │
 │              │   Publisher    │      │ Outbox Relayer │          │
-│              │ (+ breaker)    │      │ (background)   │          │
 │              └────────┬───────┘      └────────┬───────┘          │
 │                       │                       │                  │
 │                       └────────┬──────────────┘                  │
 │                                ▼                                 │
 │                  ┌──────────────────────────┐                    │
 │                  │   rabbitmq.Connection    │                    │
-│                  │ (auto-reconnect + confirm│                    │
-│                  │  + mandatory + return)   │                    │
+│                  │  ┌────────────────────┐  │                    │
+│                  │  │  Circuit Breaker   │  │                    │
+│                  │  │  (Executor iface)  │  │                    │
+│                  │  └────────────────────┘  │                    │
+│                  │  ┌────────────────────┐  │                    │
+│                  │  │  Channel Pool      │  │                    │
+│                  │  │  [ch1][ch2]...[chN]│  │                    │
+│                  │  │  (confirm mode)    │  │                    │
+│                  │  └────────────────────┘  │                    │
+│                  │  ┌────────────────────┐  │                    │
+│                  │  │  Admin Channel     │  │                    │
+│                  │  │  (consumer/topo)   │  │                    │
+│                  │  └────────────────────┘  │                    │
 │                  └──────────────┬───────────┘                    │
 │                                 │                                │
 │                                 ▼                                │
@@ -72,9 +82,9 @@ protection, and the transactional outbox pattern.
 
 | File | Purpose |
 |---|---|
-| `connection.go` | Wraps `*amqp.Connection` with auto-reconnect, confirm mode, mandatory + return handling. Single serialized publish path. |
-| `publisher.go` | High-level publish API (`PublishJSON`, `PublishToQueue`). Optional circuit breaker. |
-| `consumer.go` | Worker-pool consumer with auto-restart on reconnect, panic recovery, ack/nack policy. |
+| `connection.go` | Wraps `*amqp.Connection` with auto-reconnect, a publish channel pool (confirm mode), a dedicated admin channel (consumer/topology), and an optional circuit breaker via the `Executor` interface. |
+| `publisher.go` | High-level publish API (`PublishJSON`, `PublishToQueue`). Circuit breaker is inherited from Connection. |
+| `consumer.go` | Worker-pool consumer with auto-restart on reconnect, panic recovery, and ack/nack policy. |
 | `topology.go` | Idempotent helpers to declare exchanges, queues, and bindings. |
 | `dlq.go` | One-shot helper to declare a queue + DLX + DLQ pair. |
 | `tracing.go` | Trace ID / Request ID propagation through AMQP headers. |
@@ -105,6 +115,7 @@ sensible defaults — existing configs keep working without changes.
     "reconnectdelay": 2,
     "maxreconnectdelay": 30,
     "publishtimeout": 10,
+    "channelpoolsize": 5,
     "breaker": {
       "failurethreshold": 0.5,
       "minrequests": 10,
@@ -127,8 +138,9 @@ sensible defaults — existing configs keep working without changes.
 
 | Setting | Effect when 0 / false |
 |---|---|
-| `tls` | Uses `amqp://` (plain). Set true for `amqps://`. |
-| `breaker.failurethreshold` | Publisher created without circuit breaker. |
+| `tls` | Uses `amqp://` (plain). Set `true` for `amqps://`. |
+| `channelpoolsize` | Defaults to 5 parallel publish channels. |
+| `breaker.failurethreshold` | Connection is created without a circuit breaker. |
 | `outbox.enabled` | Outbox relayer is not started. |
 | `app.shutdowntimeout` | Falls back to 15s. |
 | Any duration field | Falls back to internal default (see code). |
@@ -137,8 +149,9 @@ sensible defaults — existing configs keep working without changes.
 
 ## Connection Lifecycle
 
-`Connection` is the heart of the module. It owns one `*amqp.Connection` and
-one `*amqp.Channel`, both rebuilt automatically on failure.
+`Connection` is the heart of the module. It owns one `*amqp.Connection`, a
+**publish channel pool**, and one **admin channel** — all rebuilt automatically
+on failure.
 
 ```go
 import "golang-project-boilerplate/internal/shared/rabbitmq"
@@ -148,22 +161,45 @@ if err != nil { /* fatal */ }
 defer conn.Close()
 ```
 
+### Publish Channel Pool
+
+Each `Publish` call acquires one channel from the pool, waits for the broker
+confirm, then returns it. Unlike a single channel behind a global mutex, the
+pool allows many goroutines to publish **in parallel**:
+
+```
+Goroutine A  ──[acquire ch1]──[send]──[wait confirm]──[release ch1]──►
+Goroutine B  ──[acquire ch2]──[send]──[wait confirm]──[release ch2]──►
+Goroutine C  ──[acquire ch3]──[send]──[wait confirm]──[release ch3]──►
+```
+
+Pool size is controlled by `channelpoolsize` (default 5). Goroutines that
+exceed the pool size block until a channel becomes available or the context
+is cancelled.
+
+On reconnect, the pool is drained and refilled with fresh channels automatically
+— no changes required in caller code.
+
+### Admin Channel
+
+A separate channel (without confirm mode) is reserved for consumers and
+topology helpers. It does not compete with the publish pool, so declare and
+consume operations never block an in-flight publish.
+
 ### What it gives you
 
 - **Auto-reconnect** with exponential backoff (`reconnectdelay` → `maxreconnectdelay`).
-- **Publisher confirms** enabled on every channel (`channel.Confirm(false)`).
-- **Mandatory + return** detection: unroutable messages surface as errors instead
-  of being silently dropped.
-- **Per-publish timeout** (`publishtimeout`) protects callers from stuck brokers.
-- **Channel re-create after reconnect**, including `Qos` and confirm mode.
+- **Publisher confirms** enabled on every pool channel (`channel.Confirm(false)`).
+- **Mandatory + return** detection: unroutable messages surface as errors instead of being silently dropped.
+- **Per-publish timeout** (`publishtimeout`) protects callers from a stuck broker.
+- **Pool rebuilt after reconnect**, including confirm mode on each new channel.
 
 ### What it does NOT do
 
-- It does not declare topology for you. Call `DeclareQueue` / `DeclareQueueWithDLQ`
-  during startup before publishing or consuming.
-- It does not buffer messages during disconnects. While reconnecting,
-  `Publish` returns `"rabbitmq channel unavailable"` — pair with the outbox
-  pattern if you need durability across outages.
+- It does not declare topology. Call `DeclareQueue` / `DeclareQueueWithDLQ`
+  at startup before publishing or consuming.
+- It does not buffer messages during disconnects. While reconnecting, `Publish`
+  returns an error — pair with the outbox pattern if you need durability across outages.
 
 ---
 
@@ -175,7 +211,7 @@ publisher := rabbitmq.NewPublisher(conn)
 // JSON to a custom exchange + routing key
 err := publisher.PublishJSON(ctx, "events.topic", "user.created", payload)
 
-// JSON to a queue via the default exchange (persistent + RK = queue name)
+// JSON directly to a queue via the default exchange
 err := publisher.PublishToQueue(ctx, "user.events", payload)
 ```
 
@@ -187,22 +223,26 @@ err := publisher.PublishToQueue(ctx, "user.events", payload)
 - Generates a fresh trace ID if `ctx` does not carry one yet.
 - Returns an error if:
   - The broker NACKs the message.
-  - The message is unroutable (mandatory + no queue).
+  - The message is unroutable (mandatory + no bound queue).
   - Publisher confirm timeout elapses.
   - The connection is currently disconnected.
+  - The circuit breaker is open (if configured on Connection).
 
-### With circuit breaker
+### Circuit Breaker
+
+The circuit breaker is configured at the `Connection` level, not on the
+Publisher. This ensures every publish path — including the outbox relayer that
+calls `conn.Publish()` directly — is protected consistently.
 
 ```go
 import "golang-project-boilerplate/internal/shared/breaker"
 
 cb := breaker.NewCircuitBreaker(cfg.RabbitMQ.Breaker)
-publisher := rabbitmq.NewPublisherWithBreaker(conn, cb)
-```
+conn, err := rabbitmq.NewConnectionWithBreaker(cfg.RabbitMQ, appLog, cb)
 
-When the breaker is `Open`, publish calls fail fast with
-`"circuit breaker is open"` — no broker round-trip. Pair with the outbox
-pattern to avoid losing events while the breaker recovers.
+// Plain publisher — breaker is automatically active via conn
+publisher := rabbitmq.NewPublisher(conn)
+```
 
 ---
 
@@ -219,7 +259,7 @@ consumer := rabbitmq.NewConsumer(conn, rabbitmq.ConsumerOptions{
     ConsumerTag:    "user-svc",
     Workers:        5,
     HandleTimeout:  30 * time.Second,
-    RequeueOnError: false, // false → goes to DLQ if configured
+    RequeueOnError: false, // false → routed to DLQ if configured
 }, func(ctx context.Context, msg amqp.Delivery) error {
     traceID := rabbitmq.TraceIDFromContext(ctx)
     return processMessage(ctx, msg.Body, traceID)
@@ -232,16 +272,11 @@ defer consumer.Stop()
 ### Guarantees
 
 - **Ack on nil error**, **Nack on non-nil error or panic**.
-- **Worker pool** — N goroutines share one delivery channel; RabbitMQ load
-  balances via prefetch.
+- **Worker pool** — N goroutines share one delivery channel; RabbitMQ load-balances via prefetch.
 - **Per-message timeout** through `HandleTimeout`.
-- **Panic recovery** — never crashes the worker; nack with the configured
-  requeue policy.
-- **Auto-restart on reconnect** — when the channel closes, workers exit
-  cleanly and a new consume session is started after the connection
-  recovers.
-- **Trace propagation** — handler receives a `ctx` enriched with trace_id /
-  request_id from message headers.
+- **Panic recovery** — never crashes the worker; nacks with the configured requeue policy.
+- **Auto-restart on reconnect** — when the channel closes, workers exit cleanly and a new consume session starts after the connection recovers.
+- **Trace propagation** — handler receives a `ctx` enriched with `trace_id` / `request_id` from message headers.
 
 ### Idempotency requirement
 
@@ -273,15 +308,14 @@ _, err = rabbitmq.DeclareQueue(conn, rabbitmq.QueueOptions{
 err = rabbitmq.BindQueue(conn, "user.events", "events.topic", "user.*", nil)
 ```
 
-All helpers are idempotent. Call them at startup before `Start`-ing any
-consumer.
+All helpers are idempotent. Call them at startup before starting any consumer.
 
 ---
 
 ## Dead Letter Queue
 
-`DeclareQueueWithDLQ` is a one-shot helper that creates the full DLQ
-topology in one call:
+`DeclareQueueWithDLQ` is a one-shot helper that creates the full DLQ topology
+in a single call:
 
 ```go
 _, err := rabbitmq.DeclareQueueWithDLQ(conn, rabbitmq.DLQOptions{
@@ -306,12 +340,12 @@ A message is routed to the DLQ when:
 - The message expires due to `MessageTTL`.
 - The main queue exceeds `MaxLength` (overflow).
 
-The DLQ message has an `x-death` header containing the original queue, the
-reason, and the redelivery count — useful for replay or alerting.
+The DLQ message carries an `x-death` header with the original queue, the reason,
+and the redelivery count — useful for replay or alerting.
 
 ### Replaying or monitoring
 
-Attach a regular consumer to `<queue>.dlq` for visibility:
+Attach a regular consumer to `<queue>.dlq`:
 
 ```go
 dlqConsumer := rabbitmq.NewConsumer(conn, rabbitmq.ConsumerOptions{
@@ -319,7 +353,7 @@ dlqConsumer := rabbitmq.NewConsumer(conn, rabbitmq.ConsumerOptions{
     Workers: 1,
 }, func(ctx context.Context, msg amqp.Delivery) error {
     log.Printf("dead letter: %s reason=%v", msg.Body, msg.Headers["x-death"])
-    return nil // ack to avoid loops
+    return nil // ack to avoid requeue loops
 })
 ```
 
@@ -341,11 +375,9 @@ req   := rabbitmq.RequestIDFromContext(ctx) // "req-123"
 
 1. **HTTP middleware** sets the request ID / trace ID in the request `ctx`.
 2. **Publisher** copies them into AMQP headers (`x-trace-id`, `x-request-id`)
-   automatically. If trace ID is missing, it generates one (UUID).
+   automatically. If trace ID is missing, a new UUID is generated.
 3. **Consumer** extracts them from `msg.Headers` back into the handler's `ctx`.
-4. **Logger** is invoked with structured fields (`trace_id`, `request_id`,
-   `message_id`, `queue`, `exchange`, `duration_ms`, …) by both publisher
-   and consumer.
+4. **Logger** is invoked with structured fields by both publisher and consumer.
 
 ### Log fields produced by this module
 
@@ -357,46 +389,84 @@ req   := rabbitmq.RequestIDFromContext(ctx) // "req-123"
 | `rabbitmq.outbox` | `id`, `attempts`, `retry_in`, `error?` |
 | `lifecycle` | `resource`, `duration_ms`, `error?` |
 
-The logger is optional — passing `nil` disables internal logging entirely.
+The logger is optional — passing `nil` disables all internal logging.
 
 ---
 
 ## Circuit Breaker
 
-The publisher uses the existing `internal/shared/breaker.CircuitBreaker`.
+The circuit breaker operates at the `Connection` level so that **all publish
+paths are protected** — both direct publishes via `Publisher` and background
+publishes via the outbox `Relayer` that calls `conn.Publish()` directly.
+
+### Dependency inversion
+
+`Connection` does not import the `breaker` package. Instead it defines its own
+minimal interface:
 
 ```go
-cb := breaker.NewCircuitBreaker(cfg.RabbitMQ.Breaker)
-publisher := rabbitmq.NewPublisherWithBreaker(conn, cb)
+type Executor interface {
+    Execute(ctx context.Context, fn func(context.Context) (interface{}, error)) (interface{}, error)
+}
 ```
 
-The breaker counts these as failures:
+`*breaker.CircuitBreaker` satisfies this interface implicitly (Go duck typing),
+so the `rabbitmq` package remains fully decoupled from the `breaker` package.
 
-- Connection / channel unavailable.
+### Usage
+
+```go
+import "golang-project-boilerplate/internal/shared/breaker"
+
+cb := breaker.NewCircuitBreaker(cfg.RabbitMQ.Breaker)
+conn, err := rabbitmq.NewConnectionWithBreaker(cfg.RabbitMQ, appLog, cb)
+
+publisher := rabbitmq.NewPublisher(conn) // breaker is automatically active
+```
+
+### State machine
+
+```
+         failure ratio ≥ threshold
+Closed ──────────────────────────────► Open
+  ▲                                      │
+  │ success in HalfOpen                  │ after timeout
+  │                                      ▼
+  └──────────────────────────────── HalfOpen
+                                  (probe N requests)
+```
+
+### What counts as a failure
+
+- Channel unavailable (during reconnect window).
 - Publisher confirm timeout.
-- Mandatory return (unroutable).
+- Mandatory return (unroutable message).
 - Broker NACK.
 
-When `Open`, publish returns immediately. When `HalfOpen`, a small number
-of probes is allowed (`MaxHalfOpenReq`); a single success closes the
-breaker, a failure re-opens it.
+When `Open`, publish returns immediately with `"circuit breaker is open"` — no
+broker round-trip. When `HalfOpen`, a small number of probes is allowed
+(`MaxHalfOpenReq`); one success closes the breaker, one failure re-opens it.
 
-The breaker is per-publisher — different events can have different
-policies (e.g., notifications vs. payments).
+### Configuration
+
+| Field | Default | Description |
+|---|---|---|
+| `failurethreshold` | `0.5` | Failure ratio that trips the breaker (0.0–1.0) |
+| `minrequests` | `10` | Minimum requests before the threshold is evaluated |
+| `timeout` | `30s` | How long the breaker stays Open before moving to HalfOpen |
+| `maxhalfopenreq` | `3` | Maximum probe requests allowed in HalfOpen state |
 
 ---
 
 ## Outbox Pattern
 
-Solves the dual-write problem: you cannot atomically commit to the
-database **and** publish to RabbitMQ. The outbox stores the event in the
-same DB transaction as the business data, then a relayer ships it to the
-broker.
+Solves the dual-write problem: you cannot atomically commit to the database
+**and** publish to RabbitMQ. The outbox stores the event in the same DB
+transaction as the business data; a background relayer then ships it to the broker.
 
 ### 1. Create the table
 
-The schema is documented in
-[`outbox/entity.go`](outbox/entity.go). For MySQL:
+The schema is documented in [`outbox/entity.go`](outbox/entity.go). For MySQL:
 
 ```sql
 CREATE TABLE outbox (
@@ -438,8 +508,8 @@ err := db.Transaction(func(tx *gorm.DB) error {
 })
 ```
 
-If the publish would fail, the row stays as `pending` and the relayer
-retries it. The user row and the event are always in sync.
+If the publish would fail, the row stays `pending` and the relayer retries it.
+The user row and the event are always in sync.
 
 ### 3. Start the relayer at boot
 
@@ -455,30 +525,26 @@ relayer.Start(ctx)
 defer relayer.Stop()
 ```
 
-Or wire from config: `cfg.RabbitMQ.Outbox.Enabled = true` triggers it
-automatically in `internal/app/container.go` (see the commented section).
-
 ### Guarantees
 
-- **Horizontal scale safe**: `FetchPending` uses `FOR UPDATE SKIP LOCKED`,
-  so multiple relayer instances cannot pick the same row.
-- **At-least-once**: a crash between publish-success and `MarkSent`
-  re-publishes the event on the next tick. Consumers must be idempotent.
-- **Bounded retries**: `MaxAttempts` exceeded → status `failed`. Monitor
-  these rows.
+- **Horizontal scale safe**: `FetchPending` uses `FOR UPDATE SKIP LOCKED`, so
+  multiple relayer instances cannot pick the same row.
+- **At-least-once**: a crash between a successful publish and `MarkSent` will
+  re-publish the event on the next tick. Consumers must be idempotent.
+- **Bounded retries**: exceeding `MaxAttempts` moves the row to `failed`. Monitor these rows.
 
 ### Trade-offs
 
 - Adds latency between DB commit and broker visibility (≤ `PollInterval`).
-- Requires consumers to dedup (use `message_id` = outbox row ID).
+- Consumers must dedup using `message_id` (= outbox row ID).
 - Failed rows accumulate — alert on `WHERE status = 'failed'`.
 
 ---
 
 ## Graceful Shutdown
 
-Resources are tracked with `*app.Lifecycle`, which closes everything in
-LIFO order on SIGINT / SIGTERM.
+Resources are tracked with `*app.Lifecycle`, which closes everything in LIFO
+order on SIGINT / SIGTERM.
 
 ```go
 lifecycle := NewLifecycle(appLog)
@@ -504,9 +570,9 @@ Add order:    logger → rabbitmq → outbox-relayer → consumer
 Close order:  consumer → outbox-relayer → rabbitmq → logger
 ```
 
-The consumer stops first (so no new handlers run), then the outbox
-relayer (no new publishes), then the connection (clean broker disconnect),
-finally the logger (so all preceding shutdown logs are flushed).
+The consumer stops first (no new handlers run), then the outbox relayer (no
+new publishes), then the connection (clean broker disconnect), and finally the
+logger (all preceding shutdown logs are flushed).
 
 ---
 
@@ -517,11 +583,14 @@ package main
 
 import (
     "context"
+    "log"
     "time"
 
     "golang-project-boilerplate/internal/app"
     "golang-project-boilerplate/internal/config"
+    "golang-project-boilerplate/internal/shared/breaker"
     "golang-project-boilerplate/internal/shared/rabbitmq"
+    "golang-project-boilerplate/internal/shared/rabbitmq/outbox"
 
     amqp "github.com/rabbitmq/amqp091-go"
 )
@@ -533,8 +602,18 @@ func main() {
     app.RunWithGracefulShutdown(fiberApp, cfg, lifecycle)
 }
 
-// Inside Container() (see internal/app/container.go) you would wire:
-func wireExample(cfg *config.Config, conn *rabbitmq.Connection, lifecycle *app.Lifecycle) {
+// Inside Container() (see internal/app/container.go):
+func wireRabbitMQ(cfg *config.Config, appLog *logger.Logger, lifecycle *app.Lifecycle) {
+    // Connection with circuit breaker
+    cb := breaker.NewCircuitBreaker(cfg.RabbitMQ.Breaker)
+    conn, err := rabbitmq.NewConnectionWithBreaker(
+        config.ToRabbitMQConfig(cfg.RabbitMQ), appLog, cb,
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+    lifecycle.AddFunc("rabbitmq", func() error { return conn.Close() })
+
     // Topology
     _, _ = rabbitmq.DeclareQueueWithDLQ(conn, rabbitmq.DLQOptions{
         Queue:         "user.events",
@@ -542,13 +621,18 @@ func wireExample(cfg *config.Config, conn *rabbitmq.Connection, lifecycle *app.L
         DLQMessageTTL: 7 * 24 * time.Hour,
     })
 
-    // Producer
+    // Publisher — breaker is active automatically via conn
     publisher := rabbitmq.NewPublisher(conn)
     ctx := rabbitmq.WithTraceID(context.Background(), "trace-1")
     _ = publisher.PublishToQueue(ctx, "user.events", map[string]any{
         "id":   42,
         "name": "kal",
     })
+
+    // Outbox relayer
+    relayer := outbox.NewRelayer(db, conn, appLog, outboxRelayerOpts(cfg.RabbitMQ.Outbox))
+    relayer.Start(ctx)
+    lifecycle.AddFunc("outbox-relayer", func() error { relayer.Stop(); return nil })
 
     // Consumer
     consumer := rabbitmq.NewConsumer(conn, rabbitmq.ConsumerOptions{
@@ -574,12 +658,13 @@ func wireExample(cfg *config.Config, conn *rabbitmq.Connection, lifecycle *app.L
 
 | Symptom | Likely cause | Where to look |
 |---|---|---|
-| `rabbitmq channel unavailable` | Publishing during reconnect window | Wait or rely on outbox / circuit breaker |
-| `publish confirmation timeout` | Slow broker or network | Tune `publishtimeout`; check broker load |
-| `message unroutable` | Mandatory + no bound queue for the routing key | Verify topology with `DeclareQueue` / `BindQueue` |
-| `publish nacked by broker` | Broker resource limits, queue arg conflict | Check management UI |
-| Consumer keeps restarting | Queue does not exist or `consume()` permission denied | Declare queue at startup |
-| Pending rows in outbox grow | Relayer not running, broker down, breaker open | Check logs for `rabbitmq.outbox` |
+| `rabbitmq channel unavailable` | Publishing during reconnect window | Wait, or rely on the outbox pattern |
+| `publish confirmation timeout` | Slow broker or network issue | Tune `publishtimeout`; check broker load |
+| `message unroutable` | Mandatory flag + no queue bound for the routing key | Verify topology with `DeclareQueue` / `BindQueue` |
+| `publish nacked by broker` | Broker resource limits or queue argument conflict | Check the management UI |
+| `circuit breaker is open` | Too many consecutive publish failures | Check broker connectivity; breaker will self-probe after `timeout` |
+| Consumer keeps restarting | Queue does not exist or missing `consume` permission | Declare queue at startup |
+| Pending outbox rows keep growing | Relayer not running, broker down, or breaker open | Check logs for `rabbitmq.outbox` |
 
 ### Things to monitor
 
@@ -587,13 +672,13 @@ func wireExample(cfg *config.Config, conn *rabbitmq.Connection, lifecycle *app.L
 - DLQ depth per queue.
 - Consumer `duration_ms` p95 — handler latency.
 - Reconnect frequency in logs.
+- Circuit breaker state (`Open` → check broker connectivity).
 
 ### Choosing requeue vs. DLQ
 
 - **`RequeueOnError: true`** — transient errors that may resolve quickly
   (locked row, brief network blip). Risk: poison messages loop forever.
-- **`RequeueOnError: false`** + DLQ — permanent failures. Inspect and
-  replay manually.
+- **`RequeueOnError: false`** + DLQ — permanent failures. Inspect and replay manually.
 
-A common pattern is to start with `false` + DLQ, and let the handler
-itself implement bounded in-process retries before returning an error.
+A common pattern is to start with `false` + DLQ, and let the handler itself
+implement bounded in-process retries before returning an error.

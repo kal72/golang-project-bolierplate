@@ -1,6 +1,7 @@
 package kafka
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"time"
@@ -14,16 +15,34 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// Executor adalah abstraksi untuk middleware eksekusi seperti circuit breaker.
+// Caller menyuntikkan implementasi konkret; package ini tidak bergantung pada
+// package breaker secara langsung.
+type Executor interface {
+	Execute(ctx context.Context, fn func(context.Context) (interface{}, error)) (interface{}, error)
+}
+
 // Client packages config, logger, dialer, and transport so producer/consumer
 // can share a consistent, secure connection setup.
 type Client struct {
 	cfg       Config
 	log       *logger.Logger
+	breaker   Executor
 	dialer    *kafka.Dialer
 	transport *kafka.Transport
 }
 
 func NewClient(cfg Config, log *logger.Logger) (*Client, error) {
+	return newClient(cfg, log, nil)
+}
+
+// NewClientWithBreaker sama seperti NewClient tetapi setiap WriteMessages dari
+// Producer yang dibuat dari Client ini akan dilindungi circuit breaker.
+func NewClientWithBreaker(cfg Config, log *logger.Logger, cb Executor) (*Client, error) {
+	return newClient(cfg, log, cb)
+}
+
+func newClient(cfg Config, log *logger.Logger, cb Executor) (*Client, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, fmt.Errorf("kafka: brokers cannot be empty")
 	}
@@ -58,6 +77,7 @@ func NewClient(cfg Config, log *logger.Logger) (*Client, error) {
 	return &Client{
 		cfg:       cfg,
 		log:       log,
+		breaker:   cb,
 		dialer:    dialer,
 		transport: transport,
 	}, nil

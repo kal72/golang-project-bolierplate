@@ -16,4 +16,5 @@ type Config struct {
 	ReconnectDelay    int // seconds, initial backoff
 	MaxReconnectDelay int // seconds, cap backoff
 	PublishTimeout    int // seconds
+	ChannelPoolSize   int // jumlah channel paralel untuk publish (default 5)
 }
